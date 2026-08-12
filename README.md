@@ -9,21 +9,26 @@ wedding-site/
 │   └── style.css      Todos los estilos
 ├── js/
 │   └── main.js         Toda la lógica (RSVP, panel de organizadores, animaciones)
+├── supabase/
+│   └── schema.sql       Script SQL para crear la tabla en Supabase
 ├── netlify.toml         Configuración básica para Netlify
 └── README.md
 ```
 
-## ⚠️ Importante antes de publicar
+## Base de datos (Supabase)
 
-Este sitio guarda las confirmaciones de RSVP usando `window.storage`, una función
-que **solo existe dentro del entorno de Claude**. Si subes este proyecto tal
-cual a Netlify (o cualquier otro hosting), la página se verá y se navegará
-perfecto, pero **el formulario de RSVP no va a guardar nada** — ni el panel de
-organizadores va a poder leer confirmaciones.
+Las confirmaciones de RSVP se guardan en Supabase, en la tabla `rsvp`
+(creada con `supabase/schema.sql`). La URL del proyecto y la llave pública
+("anon key") están directamente en `js/main.js` — es normal y seguro que la
+llave pública esté visible en el código del navegador, así está pensado
+Supabase.
 
-Antes de publicarlo en tu dominio final, hay que reemplazar esas llamadas a
-`window.storage` (están en `js/main.js`) por un backend real, como Supabase.
-Cuando quieras, seguimos con ese paso.
+**Nota de seguridad:** el panel de organizadores solo está protegido por una
+contraseña dentro del código (no por un login real). Cualquiera que
+inspeccione el código y consiga tu llave pública podría, en teoría, leer o
+borrar confirmaciones directamente por la API de Supabase, sin pasar por esa
+contraseña. Es un nivel de protección razonable para una web de boda entre
+invitados, pero no es a prueba de un usuario malicioso decidido.
 
 ## Cómo desplegarlo en Netlify
 

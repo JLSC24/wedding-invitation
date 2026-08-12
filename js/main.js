@@ -1,3 +1,12 @@
+            // Conexión a Supabase
+            const SUPABASE_URL = "https://eqpmhepvjclbvdbzjuit.supabase.co";
+            const SUPABASE_KEY =
+                "sb_publishable_SwZlQ3Q6t83S9ZENY2GNeg_DtHXDILM";
+            const supabase = window.supabase.createClient(
+                SUPABASE_URL,
+                SUPABASE_KEY,
+            );
+
             // scroll reveal
             const revealEls = document.querySelectorAll(".reveal");
             const io = new IntersectionObserver(
@@ -87,10 +96,9 @@
             );
 
             // al cargar, revisar si esta persona ya confirmó antes desde este dispositivo
-            (async function checkAlreadySubmitted() {
+            (function checkAlreadySubmitted() {
                 try {
-                    const res = await window.storage.get(SUBMITTED_KEY, false);
-                    if (res && res.value === "true") {
+                    if (localStorage.getItem(SUBMITTED_KEY) === "true") {
                         form.style.display = "none";
                         alreadySubmitted.classList.add("show");
                     }
@@ -135,30 +143,15 @@
 
                 try {
                     // revisar si ya existe una confirmación con este mismo nombre
-                    const list = await window.storage.list("rsvp:", true);
-                    const keys = list && list.keys ? list.keys : [];
-                    let duplicate = false;
-                    for (const k of keys) {
-                        try {
-                            const res = await window.storage.get(k, true);
-                            if (res && res.value) {
-                                const existing = JSON.parse(res.value);
-                                if (
-                                    (existing.name || "")
-                                        .trim()
-                                        .toLowerCase() ===
-                                    nameValue.toLowerCase()
-                                ) {
-                                    duplicate = true;
-                                    break;
-                                }
-                            }
-                        } catch (e) {
-                            /* saltar entrada ilegible */
-                        }
-                    }
+                    const { data: existing, error: checkError } =
+                        await supabase
+                            .from("rsvp")
+                            .select("id")
+                            .ilike("name", nameValue.trim());
 
-                    if (duplicate) {
+                    if (checkError) throw checkError;
+
+                    if (existing && existing.length > 0) {
                         showAlert(
                             "Ya confirmaste tu asistencia antes. ¡Agradecemos las ansias, pero tranquilo, todavía falta un poco para el gran día!",
                         );
@@ -174,25 +167,19 @@
                         message: document
                             .getElementById("message")
                             .value.trim(),
-                        submittedAt: new Date().toISOString(),
                     };
 
                     submitBtn.textContent = "Enviando...";
-                    const key =
-                        "rsvp:" +
-                        Date.now() +
-                        "-" +
-                        Math.random().toString(36).slice(2, 8);
-                    const result = await window.storage.set(
-                        key,
-                        JSON.stringify(entry),
-                        true,
-                    );
-                    if (!result) {
-                        throw new Error("No se pudo guardar");
-                    }
+                    const { error: insertError } = await supabase
+                        .from("rsvp")
+                        .insert(entry);
+                    if (insertError) throw insertError;
 
-                    await window.storage.set(SUBMITTED_KEY, "true", false);
+                    try {
+                        localStorage.setItem(SUBMITTED_KEY, "true");
+                    } catch (e) {
+                        /* si el navegador bloquea localStorage, seguimos igual */
+                    }
 
                     form.style.display = "none";
                     thankyou.classList.add("show");
@@ -261,35 +248,20 @@
                 adminEmpty.style.display = "none";
 
                 try {
-                    const list = await window.storage.list("rsvp:", true);
-                    const keys = list && list.keys ? list.keys : [];
+                    const { data: entries, error } = await supabase
+                        .from("rsvp")
+                        .select("*")
+                        .order("submitted_at", { ascending: false });
 
-                    if (keys.length === 0) {
+                    if (error) throw error;
+
+                    if (!entries || entries.length === 0) {
                         currentEntries = [];
                         adminSummary.innerHTML = "";
                         adminTable.style.display = "none";
                         adminEmpty.style.display = "block";
                         return;
                     }
-
-                    const entries = [];
-                    for (const k of keys) {
-                        try {
-                            const res = await window.storage.get(k, true);
-                            if (res && res.value) {
-                                const parsed = JSON.parse(res.value);
-                                parsed._key = k;
-                                entries.push(parsed);
-                            }
-                        } catch (e) {
-                            /* skip unreadable entry */
-                        }
-                    }
-
-                    entries.sort(
-                        (a, b) =>
-                            new Date(b.submittedAt) - new Date(a.submittedAt),
-                    );
 
                     currentEntries = entries;
 
@@ -308,8 +280,8 @@
                     adminTable.style.display = "table";
                     entries.forEach((e) => {
                         const tr = document.createElement("tr");
-                        const fecha = e.submittedAt
-                            ? new Date(e.submittedAt).toLocaleDateString(
+                        const fecha = e.submitted_at
+                            ? new Date(e.submitted_at).toLocaleDateString(
                                   "es-CO",
                                   {
                                       day: "2-digit",
@@ -323,7 +295,7 @@
           <td>${e.attending === "si" ? "Sí" : "No"}</td>
           <td>${escapeHtml(e.message || "—")}</td>
           <td>${fecha}</td>
-          <td><button class="row-delete" data-key="${escapeHtml(e._key || "")}">Eliminar</button></td>
+          <td><button class="row-delete" data-key="${escapeHtml(e.id || "")}">Eliminar</button></td>
         `;
                         adminTbody.appendChild(tr);
                     });
@@ -332,13 +304,17 @@
                         .querySelectorAll(".row-delete")
                         .forEach((btn) => {
                             btn.addEventListener("click", async () => {
-                                const key = btn.dataset.key;
+                                const id = btn.dataset.key;
                                 const ok = await showConfirm(
                                     "¿Eliminar esta confirmación? Esta acción no se puede deshacer.",
                                 );
                                 if (!ok) return;
                                 try {
-                                    await window.storage.delete(key, true);
+                                    const { error: delError } = await supabase
+                                        .from("rsvp")
+                                        .delete()
+                                        .eq("id", id);
+                                    if (delError) throw delError;
                                     loadRsvps();
                                 } catch (err) {
                                     showAlert(
@@ -371,8 +347,8 @@
                         Nombre: e.name || "",
                         Asiste: e.attending === "si" ? "Sí" : "No",
                         Mensaje: e.message || "",
-                        Fecha: e.submittedAt
-                            ? new Date(e.submittedAt).toLocaleString(
+                        Fecha: e.submitted_at
+                            ? new Date(e.submitted_at).toLocaleString(
                                   "es-CO",
                                   {
                                       day: "2-digit",
@@ -408,15 +384,11 @@
                 );
                 if (!ok) return;
                 try {
-                    const list = await window.storage.list("rsvp:", true);
-                    const keys = list && list.keys ? list.keys : [];
-                    for (const k of keys) {
-                        try {
-                            await window.storage.delete(k, true);
-                        } catch (e) {
-                            /* seguir con las demás */
-                        }
-                    }
+                    const { error: resetError } = await supabase
+                        .from("rsvp")
+                        .delete()
+                        .gte("submitted_at", "1970-01-01");
+                    if (resetError) throw resetError;
                     await loadRsvps();
                     showAlert(
                         'Se reiniciaron todas las confirmaciones. Ojo: si algún invitado ya había confirmado desde su celular, ese dispositivo seguirá mostrándole "ya confirmaste" hasta que borre los datos del sitio en su navegador.',
